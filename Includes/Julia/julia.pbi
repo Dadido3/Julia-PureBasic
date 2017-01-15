@@ -1,5 +1,5 @@
 ﻿; #### Translated to PB by David Vogel (Dadido3)
-; #### Updated: 13.01.2017
+; #### Updated: 15.01.2017
 ; #### http://github.com/Dadido3
 ; #### http://D3nexus.de
 
@@ -95,6 +95,23 @@ DeclareModule Julia
   EndStructure
   
   Structure jl_array_t
+    *data
+    CompilerIf Defined(STORE_ARRAY_LEN, #PB_Constant)
+    length.i
+    CompilerEndIf
+    flags.jl_array_flags_t
+    elsize.u
+    offset.l        ; for 1-d only. does not need to get big.
+    nrows.i
+    StructureUnion
+      ; 1d
+      maxsize.i
+      ; Nd
+      ncols.i
+    EndStructureUnion
+    ; other dim sizes go here for ndims > 2
+
+    ; followed by alignment padding and inline data, or owner pointer
   EndStructure
   
   ; compute # of extra words needed To store dimensions
@@ -587,157 +604,165 @@ DeclareModule Julia
   
   ;- object accessors -----------------------------------------------------------
   
-  ; #define jl_svec_len(t)              (((jl_svec_t*)(t))->length)
-  ; #define jl_svec_set_len_unsafe(t,n) (((jl_svec_t*)(t))->length=(n))
-  ; #define jl_svec_data(t) ((jl_value_t**)((char*)(t) + SizeOf(jl_svec_t)))
-  ; 
-  ; STATIC_INLINE jl_value_t *jl_svecref(void *t, size_t i)
-  ; {
-  ;     assert(jl_typeis(t,jl_simplevector_type));
-  ;     assert(i < jl_svec_len(t));
-  ;     Return jl_svec_data(t)[i];
-  ; }
-  ; STATIC_INLINE jl_value_t *jl_svecset(void *t, size_t i, void *x)
-  ; {
-  ;     assert(jl_typeis(t,jl_simplevector_type));
-  ;     assert(i < jl_svec_len(t));
-  ;     jl_svec_data(t)[i] = (jl_value_t*)x;
-  ;     If (x) jl_gc_wb(t, x);
-  ;     Return (jl_value_t*)x;
-  ; }
-  ; 
-  ; #ifdef STORE_ARRAY_LEN
-  ; #define jl_array_len(a)   (((jl_array_t*)(a))->length)
-  ; #else
-  ; JL_DLLEXPORT size_t jl_array_len_(jl_array_t *a);
-  ; #define jl_array_len(a)   jl_array_len_((jl_array_t*)(a))
-  ; #endif
-  ; #define jl_array_data(a)  ((void*)((jl_array_t*)(a))->Data)
-  ; #define jl_array_dim(a,i) ((&((jl_array_t*)(a))->nrows)[i])
-  ; #define jl_array_dim0(a)  (((jl_array_t*)(a))->nrows)
-  ; #define jl_array_nrows(a) (((jl_array_t*)(a))->nrows)
-  ; #define jl_array_ndims(a) ((int32_t)(((jl_array_t*)a)->flags.ndims))
-  ; #define jl_array_data_owner_offset(ndims) (OffsetOf(jl_array_t,ncols) + SizeOf(size_t)*(1+jl_array_ndimwords(ndims))) ; in bytes
-  ; #define jl_array_data_owner(a) (*((jl_value_t**)((char*)a + jl_array_data_owner_offset(jl_array_ndims(a)))))
-  ; 
-  ; STATIC_INLINE jl_value_t *jl_array_ptr_ref(void *a, size_t i)
-  ; {
-  ;     assert(i < jl_array_len(a));
-  ;     Return ((jl_value_t**)(jl_array_data(a)))[i];
-  ; }
-  ; STATIC_INLINE jl_value_t *jl_array_ptr_set(void *a, size_t i, void *x)
-  ; {
-  ;     assert(i < jl_array_len(a));
-  ;     ((jl_value_t**)(jl_array_data(a)))[i] = (jl_value_t*)x;
-  ;     If (x) {
-  ;         If (((jl_array_t*)a)->flags.how == 3) {
-  ;             a = jl_array_data_owner(a);
-  ;         }
-  ;         jl_gc_wb(a, x);
-  ;     }
-  ;     Return (jl_value_t*)x;
-  ; }
-  ; 
-  ; STATIC_INLINE uint8_t jl_array_uint8_ref(void *a, size_t i)
-  ; {
-  ;     assert(i < jl_array_len(a));
-  ;     assert(jl_typeis(a, jl_array_uint8_type));
-  ;     Return ((uint8_t*)(jl_array_data(a)))[i];
-  ; }
-  ; STATIC_INLINE void jl_array_uint8_set(void *a, size_t i, uint8_t x)
-  ; {
-  ;     assert(i < jl_array_len(a));
-  ;     assert(jl_typeis(a, jl_array_uint8_type));
-  ;     ((uint8_t*)(jl_array_data(a)))[i] = x;
-  ; }
-  ; 
-  ; #define jl_exprarg(e,n) (((jl_value_t**)jl_array_data(((jl_expr_t*)(e))->args))[n])
-  ; #define jl_exprargset(e, n, v) jl_array_ptr_set(((jl_expr_t*)(e))->args, n, v)
-  ; #define jl_expr_nargs(e) jl_array_len(((jl_expr_t*)(e))->args)
-  ; 
-  ; #define jl_fieldref(s,i) jl_get_nth_field(((jl_value_t*)s),i)
-  ; #define jl_nfields(v)    jl_datatype_nfields(jl_typeof(v))
-  ; 
-  ; ; Not using jl_fieldref to avoid allocations
-  ; #define jl_linenode_line(x) (((intptr_t*)x)[0])
-  ; #define jl_labelnode_label(x) (((intptr_t*)x)[0])
-  ; #define jl_slot_number(x) (((intptr_t*)x)[0])
-  ; #define jl_typedslot_get_type(x) (((jl_value_t**)x)[1])
-  ; #define jl_gotonode_label(x) (((intptr_t*)x)[0])
-  ; #define jl_globalref_mod(s) (*(jl_module_t**)s)
-  ; #define jl_globalref_name(s) (((jl_sym_t**)s)[1])
-  ; 
-  ; #define jl_nparams(t)  jl_svec_len(((jl_datatype_t*)(t))->parameters)
-  ; #define jl_tparam0(t)  jl_svecref(((jl_datatype_t*)(t))->parameters, 0)
-  ; #define jl_tparam1(t)  jl_svecref(((jl_datatype_t*)(t))->parameters, 1)
-  ; #define jl_tparam(t,i) jl_svecref(((jl_datatype_t*)(t))->parameters, i)
-  ; 
-  ; ; get a pointer to the data in a datatype
-  ; #define jl_data_ptr(v)  ((jl_value_t**)v)
-  ; 
-  ; #define jl_array_ptr_data(a)   ((jl_value_t**)((jl_array_t*)a)->Data)
-  ; #define jl_string_data(s) ((char*)((jl_array_t*)jl_data_ptr(s)[0])->Data)
-  ; #define jl_string_len(s)  (jl_array_len((jl_array_t*)(jl_data_ptr(s)[0])))
-  ; #define jl_iostr_data(s)  ((char*)((jl_array_t*)jl_data_ptr(s)[0])->Data)
-  ; 
-  ; #define jl_gf_mtable(f) (((jl_datatype_t*)jl_typeof(f))->name->mt)
-  ; #define jl_gf_name(f)   (jl_gf_mtable(f)->name)
-  ; 
-  ; ; struct type info
-  ; #define jl_field_name(st,i)    (jl_sym_t*)jl_svecref(((jl_datatype_t*)st)->name->names, (i))
-  ; #define jl_field_type(st,i)    jl_svecref(((jl_datatype_t*)st)->types, (i))
-  ; #define jl_field_count(st)     jl_svec_len(((jl_datatype_t*)st)->types)
-  ; #define jl_datatype_size(t)    (((jl_datatype_t*)t)->size)
-  ; #define jl_datatype_nfields(t) (((jl_datatype_t*)(t))->layout->nfields)
-  ; 
-  ; ; inline version with strong type check to detect typos in a `->name` chain
-  ; STATIC_INLINE char *jl_symbol_name_(jl_sym_t *s)
-  ; {
-  ;     Return (char*)s + LLT_ALIGN(SizeOf(jl_sym_t), SizeOf(void*));
-  ; }
-  ; #define jl_symbol_name(s) jl_symbol_name_(s)
-  ; 
-  ; #define jl_dt_layout_fields(d) ((const char*)(d) + SizeOf(jl_datatype_layout_t))
-  ; 
-  ; #define DEFINE_FIELD_ACCESSORS(f)                                             \
-  ;     Static inline uint32_t jl_field_##f(jl_datatype_t *st, int i)             \
-  ;     {                                                                         \
-  ;         const jl_datatype_layout_t *ly = st->layout;                          \
-  ;         assert(i >= 0 && (size_t)i < ly->nfields);                            \
-  ;         If (ly->fielddesc_type == 0) {                                        \
-  ;             Return ((const jl_fielddesc8_t*)jl_dt_layout_fields(ly))[i].f;    \
-  ;         }                                                                     \
-  ;         Else If (ly->fielddesc_type == 1) {                                   \
-  ;             Return ((const jl_fielddesc16_t*)jl_dt_layout_fields(ly))[i].f;   \
-  ;         }                                                                     \
-  ;         Else {                                                                \
-  ;             Return ((const jl_fielddesc32_t*)jl_dt_layout_fields(ly))[i].f;   \
-  ;         }                                                                     \
-  ;     }                                                                         \
-  ; 
-  ; DEFINE_FIELD_ACCESSORS(offset)
-  ; DEFINE_FIELD_ACCESSORS(size)
-  ; Static inline int jl_field_isptr(jl_datatype_t *st, int i)
-  ; {
-  ;     const jl_datatype_layout_t *ly = st->layout;
-  ;     assert(i >= 0 && (size_t)i < ly->nfields);
-  ;     Return ((const jl_fielddesc8_t*)(jl_dt_layout_fields(ly) + (i << (ly->fielddesc_type + 1))))->isptr;
-  ; }
-  ; 
-  ; Static inline uint32_t jl_fielddesc_size(int8_t fielddesc_type)
-  ; {
-  ;     If (fielddesc_type == 0) {
-  ;         Return SizeOf(jl_fielddesc8_t);
-  ;     }
-  ;     Else If (fielddesc_type == 1) {
-  ;         Return SizeOf(jl_fielddesc16_t);
-  ;     }
-  ;     Else {
-  ;         Return SizeOf(jl_fielddesc32_t);
-  ;     }
-  ; }
-  ; 
-  ; #undef DEFINE_FIELD_ACCESSORS
+;   #define jl_svec_len(t)              (((jl_svec_t*)(t))->length)
+;   #define jl_svec_set_len_unsafe(t,n) (((jl_svec_t*)(t))->length=(n))
+;   #define jl_svec_data(t) ((jl_value_t**)((char*)(t) + SizeOf(jl_svec_t)))
+;   
+;   STATIC_INLINE jl_value_t *jl_svecref(void *t, size_t i)
+;   {
+;       assert(jl_typeis(t,jl_simplevector_type));
+;       assert(i < jl_svec_len(t));
+;       Return jl_svec_data(t)[i];
+;   }
+;   STATIC_INLINE jl_value_t *jl_svecset(void *t, size_t i, void *x)
+;   {
+;       assert(jl_typeis(t,jl_simplevector_type));
+;       assert(i < jl_svec_len(t));
+;       jl_svec_data(t)[i] = (jl_value_t*)x;
+;       If (x) jl_gc_wb(t, x);
+;       Return (jl_value_t*)x;
+;   }
+;   
+  CompilerIf Defined(STORE_ARRAY_LEN, #PB_Constant)
+;   Procedure.i jl_array_len(*a.jl_array_t)
+;     ProcedureReturn *a\length
+;   EndProcedure
+  CompilerElse
+  PrototypeC.i jl_array_len_(*a.jl_array_t)
+;   Procedure.i jl_array_len(*a.jl_array_t)
+;     ProcedureReturn jl_array_len_(*a)
+;   EndProcedure
+  CompilerEndIf
+;   #define jl_array_data(a)  ((void*)((jl_array_t*)(a))->Data)
+;   #define jl_array_dim(a,i) ((&((jl_array_t*)(a))->nrows)[i])
+;   #define jl_array_dim0(a)  (((jl_array_t*)(a))->nrows)
+;   #define jl_array_nrows(a) (((jl_array_t*)(a))->nrows)
+;   #define jl_array_ndims(a) ((int32_t)(((jl_array_t*)a)->flags.ndims))
+;   #define jl_array_data_owner_offset(ndims) (OffsetOf(jl_array_t,ncols) + SizeOf(size_t)*(1+jl_array_ndimwords(ndims))) ; in bytes
+;   #define jl_array_data_owner(a) (*((jl_value_t**)((char*)a + jl_array_data_owner_offset(jl_array_ndims(a)))))
+;   
+;   STATIC_INLINE jl_value_t *jl_array_ptr_ref(void *a, size_t i)
+;   {
+;       assert(i < jl_array_len(a));
+;       Return ((jl_value_t**)(jl_array_data(a)))[i];
+;   }
+;   STATIC_INLINE jl_value_t *jl_array_ptr_set(void *a, size_t i, void *x)
+;   {
+;       assert(i < jl_array_len(a));
+;       ((jl_value_t**)(jl_array_data(a)))[i] = (jl_value_t*)x;
+;       If (x) {
+;           If (((jl_array_t*)a)->flags.how == 3) {
+;               a = jl_array_data_owner(a);
+;           }
+;           jl_gc_wb(a, x);
+;       }
+;       Return (jl_value_t*)x;
+;   }
+;   
+;   STATIC_INLINE uint8_t jl_array_uint8_ref(void *a, size_t i)
+;   {
+;       assert(i < jl_array_len(a));
+;       assert(jl_typeis(a, jl_array_uint8_type));
+;       Return ((uint8_t*)(jl_array_data(a)))[i];
+;   }
+;   STATIC_INLINE void jl_array_uint8_set(void *a, size_t i, uint8_t x)
+;   {
+;       assert(i < jl_array_len(a));
+;       assert(jl_typeis(a, jl_array_uint8_type));
+;       ((uint8_t*)(jl_array_data(a)))[i] = x;
+;   }
+;   
+;   #define jl_exprarg(e,n) (((jl_value_t**)jl_array_data(((jl_expr_t*)(e))->args))[n])
+;   #define jl_exprargset(e, n, v) jl_array_ptr_set(((jl_expr_t*)(e))->args, n, v)
+;   #define jl_expr_nargs(e) jl_array_len(((jl_expr_t*)(e))->args)
+;   
+;   #define jl_fieldref(s,i) jl_get_nth_field(((jl_value_t*)s),i)
+;   #define jl_nfields(v)    jl_datatype_nfields(jl_typeof(v))
+;   
+;   ; Not using jl_fieldref to avoid allocations
+;   #define jl_linenode_line(x) (((intptr_t*)x)[0])
+;   #define jl_labelnode_label(x) (((intptr_t*)x)[0])
+;   #define jl_slot_number(x) (((intptr_t*)x)[0])
+;   #define jl_typedslot_get_type(x) (((jl_value_t**)x)[1])
+;   #define jl_gotonode_label(x) (((intptr_t*)x)[0])
+;   #define jl_globalref_mod(s) (*(jl_module_t**)s)
+;   #define jl_globalref_name(s) (((jl_sym_t**)s)[1])
+;   
+;   #define jl_nparams(t)  jl_svec_len(((jl_datatype_t*)(t))->parameters)
+;   #define jl_tparam0(t)  jl_svecref(((jl_datatype_t*)(t))->parameters, 0)
+;   #define jl_tparam1(t)  jl_svecref(((jl_datatype_t*)(t))->parameters, 1)
+;   #define jl_tparam(t,i) jl_svecref(((jl_datatype_t*)(t))->parameters, i)
+;   
+;   ; get a pointer to the data in a datatype
+;   #define jl_data_ptr(v)  ((jl_value_t**)v)
+;   
+;   #define jl_array_ptr_data(a)   ((jl_value_t**)((jl_array_t*)a)->Data)
+;   #define jl_string_data(s) ((char*)((jl_array_t*)jl_data_ptr(s)[0])->Data)
+;   #define jl_string_len(s)  (jl_array_len((jl_array_t*)(jl_data_ptr(s)[0])))
+;   #define jl_iostr_data(s)  ((char*)((jl_array_t*)jl_data_ptr(s)[0])->Data)
+;   
+;   #define jl_gf_mtable(f) (((jl_datatype_t*)jl_typeof(f))->name->mt)
+;   #define jl_gf_name(f)   (jl_gf_mtable(f)->name)
+;   
+;   ; struct type info
+;   #define jl_field_name(st,i)    (jl_sym_t*)jl_svecref(((jl_datatype_t*)st)->name->names, (i))
+;   #define jl_field_type(st,i)    jl_svecref(((jl_datatype_t*)st)->types, (i))
+;   #define jl_field_count(st)     jl_svec_len(((jl_datatype_t*)st)->types)
+;   #define jl_datatype_size(t)    (((jl_datatype_t*)t)->size)
+;   #define jl_datatype_nfields(t) (((jl_datatype_t*)(t))->layout->nfields)
+;   
+;   ; inline version with strong type check to detect typos in a `->name` chain
+;   STATIC_INLINE char *jl_symbol_name_(jl_sym_t *s)
+;   {
+;       Return (char*)s + LLT_ALIGN(SizeOf(jl_sym_t), SizeOf(void*));
+;   }
+;   #define jl_symbol_name(s) jl_symbol_name_(s)
+;   
+;   #define jl_dt_layout_fields(d) ((const char*)(d) + SizeOf(jl_datatype_layout_t))
+;   
+;   #define DEFINE_FIELD_ACCESSORS(f)                                             \
+;       Static inline uint32_t jl_field_##f(jl_datatype_t *st, int i)             \
+;       {                                                                         \
+;           const jl_datatype_layout_t *ly = st->layout;                          \
+;           assert(i >= 0 && (size_t)i < ly->nfields);                            \
+;           If (ly->fielddesc_type == 0) {                                        \
+;               Return ((const jl_fielddesc8_t*)jl_dt_layout_fields(ly))[i].f;    \
+;           }                                                                     \
+;           Else If (ly->fielddesc_type == 1) {                                   \
+;               Return ((const jl_fielddesc16_t*)jl_dt_layout_fields(ly))[i].f;   \
+;           }                                                                     \
+;           Else {                                                                \
+;               Return ((const jl_fielddesc32_t*)jl_dt_layout_fields(ly))[i].f;   \
+;           }                                                                     \
+;       }                                                                         \
+;   
+;   DEFINE_FIELD_ACCESSORS(offset)
+;   DEFINE_FIELD_ACCESSORS(size)
+;   Static inline int jl_field_isptr(jl_datatype_t *st, int i)
+;   {
+;       const jl_datatype_layout_t *ly = st->layout;
+;       assert(i >= 0 && (size_t)i < ly->nfields);
+;       Return ((const jl_fielddesc8_t*)(jl_dt_layout_fields(ly) + (i << (ly->fielddesc_type + 1))))->isptr;
+;   }
+;   
+;   Static inline uint32_t jl_fielddesc_size(int8_t fielddesc_type)
+;   {
+;       If (fielddesc_type == 0) {
+;           Return SizeOf(jl_fielddesc8_t);
+;       }
+;       Else If (fielddesc_type == 1) {
+;           Return SizeOf(jl_fielddesc16_t);
+;       }
+;       Else {
+;           Return SizeOf(jl_fielddesc32_t);
+;       }
+;   }
+;   
+;   #undef DEFINE_FIELD_ACCESSORS
+  
+  If _JL_Library_ID
+    Global jl_array_len_.jl_array_len_                   = GetFunction(_JL_Library_ID, "jl_array_len_")
+  EndIf
   
   ;- basic predicates -----------------------------------------------------------
   Macro jl_is_nothing(v)            : ((v) =  *jl_nothing\_)                                                    : EndMacro
@@ -1519,10 +1544,10 @@ DeclareModule Julia
     *value.jl_value_t[0]
   EndStructure
   
-  PrototypeC.i jl_call(*f.jl_function_t, *args.jl_value_t_array, nargs.l)        ; Returns *jl_value_t.jl_value_t
-  PrototypeC.i jl_call0(*f.jl_function_t)                                   ; Returns *jl_value_t.jl_value_t
-  PrototypeC.i jl_call1(*f.jl_function_t, *a.jl_value_t)                    ; Returns *jl_value_t.jl_value_t
-  PrototypeC.i jl_call2(*f.jl_function_t, *a.jl_value_t, *b.jl_value_t)     ; Returns *jl_value_t.jl_value_t
+  PrototypeC.i jl_call(*f.jl_function_t, *args.jl_value_t_array, nargs.l)               ; Returns *jl_value_t.jl_value_t
+  PrototypeC.i jl_call0(*f.jl_function_t)                                               ; Returns *jl_value_t.jl_value_t
+  PrototypeC.i jl_call1(*f.jl_function_t, *a.jl_value_t)                                ; Returns *jl_value_t.jl_value_t
+  PrototypeC.i jl_call2(*f.jl_function_t, *a.jl_value_t, *b.jl_value_t)                 ; Returns *jl_value_t.jl_value_t
   PrototypeC.i jl_call3(*f.jl_function_t, *a.jl_value_t, *b.jl_value_t, *c.jl_value_t)  ; Returns *jl_value_t.jl_value_t
   
   ; interfacing with Task runtime
@@ -1557,7 +1582,7 @@ DeclareModule Julia
 ;     *gcstack.jl_gcframe_t
 ;     *prev.jl_handler_t
 ;     gc_state.b
-;     CompilerIf #JULIA_ENABLE_THREADING
+;     CompilerIf Defined(JULIA_ENABLE_THREADING, #PB_Constant)
 ;     locks_len.i
 ;     CompilerEndIf
 ;     defer_signal.sig_atomic_t
@@ -1593,7 +1618,7 @@ DeclareModule Julia
 ;     ; id of owning thread
 ;     ; does not need to be defined until the task runs
 ;     tid.w
-;     CompilerIf #JULIA_ENABLE_THREADING
+;     CompilerIf Defined(JULIA_ENABLE_THREADING, #PB_Constant)
 ;     ; This is statically initialized when the task is not holding any locks
 ;     locks.arraylist_t
 ;     CompilerEndIf
@@ -2117,7 +2142,7 @@ CompilerEndIf
 ;     old_gc_state.b = *ptls.gc_state
 ;     *current_task.eh = *eh.prev
 ;     *ptls.pgcstack = *eh.gcstack
-;     CompilerIf #JULIA_ENABLE_THREADING
+;     CompilerIf Defined(JULIA_ENABLE_THREADING, #PB_Constant)
 ;     *locks.arraylist_t = @*current_task.locks
 ;     If (*locks.len > *eh.locks_len)
 ;       For i.i = *locks.len To *eh.locks_len + 1 Step -1
@@ -2140,11 +2165,11 @@ CompilerEndIf
 EndModule
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 1521
-; FirstLine = 1492
+; CursorPosition = 632
+; FirstLine = 614
 ; Folding = ------------
 ; EnableUnicode
 ; EnableXP
-; EnableCompileCount = 14
+; EnableCompileCount = 9
 ; EnableBuildCount = 0
 ; EnableExeConstant
