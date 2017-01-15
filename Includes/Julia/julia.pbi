@@ -1,5 +1,5 @@
 ﻿; #### Translated to PB by David Vogel (Dadido3)
-; #### Updated: 28.12.2016
+; #### Updated: 13.01.2017
 ; #### http://github.com/Dadido3
 ; #### http://D3nexus.de
 
@@ -480,9 +480,9 @@ DeclareModule Julia
   EndStructure
   Macro jl_ptls_t : jl_tls_states_t : EndMacro
   
-  PrototypeC.i jl_get_ptls_states()
+  PrototypeC.i jl_get_ptls_states() ; Returns *jl_ptls_t.jl_ptls_t
   If _JL_Library_ID
-    Global jl_get_ptls_states.jl_get_ptls_states = GetFunction(0, "jl_get_ptls_states")
+    Global jl_get_ptls_states.jl_get_ptls_states = GetFunction(_JL_Library_ID, "jl_get_ptls_states")
   EndIf
   
   ;- gc -------------------------------------------------------------------------
@@ -1515,7 +1515,11 @@ DeclareModule Julia
   ;   ProcedureReturn jl_apply_generic(args, nargs)
   ; EndProcedure
   
-  ; PrototypeC.i jl_call(*f.jl_function_t, **args.jl_value_t, nargs.l)        ; Returns *jl_value_t.jl_value_t
+  Structure jl_value_t_array
+    *value.jl_value_t[0]
+  EndStructure
+  
+  PrototypeC.i jl_call(*f.jl_function_t, *args.jl_value_t_array, nargs.l)        ; Returns *jl_value_t.jl_value_t
   PrototypeC.i jl_call0(*f.jl_function_t)                                   ; Returns *jl_value_t.jl_value_t
   PrototypeC.i jl_call1(*f.jl_function_t, *a.jl_value_t)                    ; Returns *jl_value_t.jl_value_t
   PrototypeC.i jl_call2(*f.jl_function_t, *a.jl_value_t, *b.jl_value_t)     ; Returns *jl_value_t.jl_value_t
@@ -1531,7 +1535,7 @@ DeclareModule Julia
   PrototypeC   jl_sigatomic_end()
   
   If _JL_Library_ID
-    ; Global jl_call.jl_call                                     = GetFunction(_JL_Library_ID, "jl_call")
+    Global jl_call.jl_call                                     = GetFunction(_JL_Library_ID, "jl_call")
     Global jl_call0.jl_call0                                   = GetFunction(_JL_Library_ID, "jl_call0")
     Global jl_call1.jl_call1                                   = GetFunction(_JL_Library_ID, "jl_call1")
     Global jl_call2.jl_call2                                   = GetFunction(_JL_Library_ID, "jl_call2")
@@ -1737,9 +1741,15 @@ DeclareModule Julia
   ; PrototypeC   jl_safe_printf(str.p-utf8, ...)
       ; _JL_FORMAT_ATTR(printf, 1, 2);
   
-  ; Global *JL_STDIN.JL_STREAM
-  ; Global *JL_STDOUT.JL_STREAM
-  ; Global *JL_STDERR.JL_STREAM
+  Structure JL_STREAM
+  EndStructure
+  Structure JL_STREAM_p
+    *_.JL_STREAM
+  EndStructure
+  
+  Global *JL_STDIN.JL_STREAM_p
+  Global *JL_STDOUT.JL_STREAM_p
+  Global *JL_STDERR.JL_STREAM_p
   
   PrototypeC.i jl_stdout_stream()                                           ; Returns *JL_STREAM.JL_STREAM
   PrototypeC.i jl_stdin_stream()                                            ; Returns *JL_STREAM.JL_STREAM
@@ -1750,8 +1760,8 @@ DeclareModule Julia
   PrototypeC   jl_flush_cstdio()
   PrototypeC.i jl_stdout_obj()                                              ; Returns *jl_value_t.jl_value_t
   PrototypeC.i jl_stderr_obj()                                              ; Returns *jl_value_t.jl_value_t
-  ; PrototypeC.i jl_static_show(*out.JL_STREAM, *v.jl_value_t)
-  ; PrototypeC.i jl_static_show_func_sig(*s.JL_STREAM, *type.jl_value_t)
+  PrototypeC.i jl_static_show(*out.JL_STREAM, *v.jl_value_t)
+  PrototypeC.i jl_static_show_func_sig(*s.JL_STREAM, *type.jl_value_t)
   PrototypeC   jlbacktrace()
   ; Mainly for debugging, use `void*` so that no type cast is needed in C++.
   PrototypeC   jl_(*jl_value)
@@ -1761,9 +1771,9 @@ DeclareModule Julia
     ; Global jl_vprintf.jl_vprintf                             = GetFunction(_JL_Library_ID, "jl_vprintf")
     ; Global jl_safe_printf.jl_safe_printf                     = GetFunction(_JL_Library_ID, "jl_safe_printf")
     
-    ; Global *JL_STDIN                                         = GetFunction(_JL_Library_ID, "JL_STDIN")
-    ; Global *JL_STDOUT                                        = GetFunction(_JL_Library_ID, "JL_STDOUT")
-    ; Global *JL_STDERR                                        = GetFunction(_JL_Library_ID, "JL_STDERR")
+    Global *JL_STDIN                                         = GetFunction(_JL_Library_ID, "JL_STDIN")
+    Global *JL_STDOUT                                        = GetFunction(_JL_Library_ID, "JL_STDOUT")
+    Global *JL_STDERR                                        = GetFunction(_JL_Library_ID, "JL_STDERR")
     
     Global jl_stdout_stream.jl_stdout_stream                 = GetFunction(_JL_Library_ID, "jl_stdout_stream")
     Global jl_stdin_stream.jl_stdin_stream                   = GetFunction(_JL_Library_ID, "jl_stdin_stream")
@@ -1773,8 +1783,8 @@ DeclareModule Julia
     Global jl_flush_cstdio.jl_flush_cstdio                   = GetFunction(_JL_Library_ID, "jl_flush_cstdio")
     Global jl_stdout_obj.jl_stdout_obj                       = GetFunction(_JL_Library_ID, "jl_stdout_obj")
     Global jl_stderr_obj.jl_stderr_obj                       = GetFunction(_JL_Library_ID, "jl_stderr_obj")
-    ; Global jl_static_show.jl_static_show                     = GetFunction(_JL_Library_ID, "jl_static_show")
-    ; Global jl_static_show_func_sig.jl_static_show_func_sig   = GetFunction(_JL_Library_ID, "jl_static_show_func_sig")
+    Global jl_static_show.jl_static_show                     = GetFunction(_JL_Library_ID, "jl_static_show")
+    Global jl_static_show_func_sig.jl_static_show_func_sig   = GetFunction(_JL_Library_ID, "jl_static_show_func_sig")
     Global jlbacktrace.jlbacktrace                           = GetFunction(_JL_Library_ID, "jlbacktrace")
     Global jl_.jl_                                           = GetFunction(_JL_Library_ID, "jl_")
   EndIf
@@ -2130,11 +2140,11 @@ CompilerEndIf
 EndModule
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 1894
-; FirstLine = 1855
+; CursorPosition = 1521
+; FirstLine = 1492
 ; Folding = ------------
 ; EnableUnicode
 ; EnableXP
-; EnableCompileCount = 9
+; EnableCompileCount = 14
 ; EnableBuildCount = 0
 ; EnableExeConstant
