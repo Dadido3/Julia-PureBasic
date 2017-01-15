@@ -25,6 +25,12 @@ DeclareModule Julia
     Macro C_uLong : l : EndMacro
   CompilerEndIf
   
+  ; #### Configuration options that affect the Julia ABI
+  ; If this is not defined, only individual dimension sizes are
+  ; stored and not total length, to save space.
+  #STORE_ARRAY_LEN = 1
+  ; #### End Configuration options
+  
   ;- core Data types ------------------------------------------------------------
   
   ; the common fields are hidden before the pointer, but the following Macro is
@@ -95,7 +101,7 @@ DeclareModule Julia
   EndStructure
   
   Structure jl_array_t
-    *data
+    *_data
     CompilerIf Defined(STORE_ARRAY_LEN, #PB_Constant)
     length.i
     CompilerEndIf
@@ -623,17 +629,13 @@ DeclareModule Julia
 ;       Return (jl_value_t*)x;
 ;   }
 ;   
-  CompilerIf Defined(STORE_ARRAY_LEN, #PB_Constant)
-;   Procedure.i jl_array_len(*a.jl_array_t)
-;     ProcedureReturn *a\length
-;   EndProcedure
-  CompilerElse
+CompilerIf Defined(STORE_ARRAY_LEN, #PB_Constant)
+  Declare.i jl_array_len(*a.jl_array_t)
+CompilerElse
   PrototypeC.i jl_array_len_(*a.jl_array_t)
-;   Procedure.i jl_array_len(*a.jl_array_t)
-;     ProcedureReturn jl_array_len_(*a)
-;   EndProcedure
-  CompilerEndIf
-;   #define jl_array_data(a)  ((void*)((jl_array_t*)(a))->Data)
+  Declare.i jl_array_len(*a.jl_array_t)
+CompilerEndIf
+  Declare.i jl_array_data(*a.jl_array_t)
 ;   #define jl_array_dim(a,i) ((&((jl_array_t*)(a))->nrows)[i])
 ;   #define jl_array_dim0(a)  (((jl_array_t*)(a))->nrows)
 ;   #define jl_array_nrows(a) (((jl_array_t*)(a))->nrows)
@@ -761,7 +763,9 @@ DeclareModule Julia
 ;   #undef DEFINE_FIELD_ACCESSORS
   
   If _JL_Library_ID
+  CompilerIf Not Defined(STORE_ARRAY_LEN, #PB_Constant)
     Global jl_array_len_.jl_array_len_                   = GetFunction(_JL_Library_ID, "jl_array_len_")
+  CompilerEndIf
   EndIf
   
   ;- basic predicates -----------------------------------------------------------
@@ -2086,6 +2090,21 @@ Module Julia
     FreeMemory(*Temp)
   EndProcedure
   
+  ;- object accessors -----------------------------------------------------------
+  
+CompilerIf Defined(STORE_ARRAY_LEN, #PB_Constant)
+  Procedure.i jl_array_len(*a.jl_array_t)
+    ProcedureReturn *a\length
+  EndProcedure
+CompilerElse
+  Procedure.i jl_array_len(*a.jl_array_t)
+    ProcedureReturn jl_array_len_(*a)
+  EndProcedure
+CompilerEndIf
+  Procedure.i jl_array_data(*a.jl_array_t)
+    ProcedureReturn *a\_data
+  EndProcedure
+  
   ;- basic predicates -----------------------------------------------------------
   
   Procedure.i jl_get_function(*m.jl_module_t, name.s)
@@ -2165,11 +2184,11 @@ CompilerEndIf
 EndModule
 
 ; IDE Options = PureBasic 5.42 LTS (Windows - x64)
-; CursorPosition = 632
-; FirstLine = 614
-; Folding = ------------
+; CursorPosition = 2104
+; FirstLine = 2088
+; Folding = -------------
 ; EnableUnicode
 ; EnableXP
-; EnableCompileCount = 9
+; EnableCompileCount = 10
 ; EnableBuildCount = 0
 ; EnableExeConstant
